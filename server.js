@@ -1,61 +1,37 @@
-require("dotenv").config();
-const express = require("express");
-const multer = require("multer");
-const B2 = require("backblaze-b2");
-const cors = require("cors");
+// server.js
+require('dotenv').config();
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const { uploadToB2 } = require('./b2Service');
 
 const app = express();
-app.use(cors());
 
-const upload = multer({ storage: multer.memoryStorage() });
+// ✅ CORS allow all for testing (replace '*' with your frontend domain in production)
+app.use(cors({ origin: '*' }));
 
-const b2 = new B2({
-  applicationKeyId: process.env.B2_KEY_ID,
-  applicationKey: process.env.B2_APP_KEY,
-});
+// Multer config: store file in memory before uploading to B2
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-// Upload Endpoint
-app.post("/upload", upload.single("file"), async (req, res) => {
+// Health check route
+app.get('/', (req, res) => res.send('B2 server running'));
+
+// Upload route
+app.post('/upload', upload.single('file'), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // STEP 1 authorize every upload
-    await b2.authorize();
+    // Call B2 service to upload file
+    const url = await uploadToB2(req.file.buffer, req.file.originalname);
 
-    // STEP 2 get fresh upload URL
-    const uploadUrlResponse = await b2.getUploadUrl({
-      bucketId: process.env.B2_BUCKET_ID,
-    });
-
-    const uploadUrl = uploadUrlResponse.data.uploadUrl;
-    const uploadAuthToken = uploadUrlResponse.data.authorizationToken;
-
-    const file = req.file;
-    const fileName = `${Date.now()}-${file.originalname}`;
-
-    // STEP 3 upload file
-    await b2.uploadFile({
-      uploadUrl: uploadUrl,
-      uploadAuthToken: uploadAuthToken,
-      fileName: fileName,
-      data: file.buffer,
-    });
-
-    const fileUrl = `https://f005.backblazeb2.com/file/${process.env.B2_BUCKET_NAME}/${fileName}`;
-
-    res.json({ url: fileUrl });
-
+    res.json({ url });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Upload failed");
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Upload failed' });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("B2 Server Running ✅");
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start server
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`B2 server running on port ${PORT}`));
