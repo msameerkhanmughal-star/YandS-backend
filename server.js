@@ -13,43 +13,33 @@ const b2 = new B2({
   applicationKeyId: process.env.B2_KEY_ID,
   applicationKey: process.env.B2_APP_KEY,
 });
-console.log("B2_BUCKET_ID:", process.env.B2_BUCKET_ID);
-console.log("B2_BUCKET_NAME:", process.env.B2_BUCKET_NAME);
-let uploadUrlData;
 
-// ✅ Authorize B2
-async function authorize() {
-  console.log("Authorizing B2...");
-  await b2.authorize();
-
-  uploadUrlData = await b2.getUploadUrl({
-    bucketId: process.env.B2_BUCKET_ID,
-  });
-
-  console.log("✅ B2 Authorized");
-}
-
-authorize();
-
-
-// ✅ Upload Endpoint
+// Upload Endpoint
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!uploadUrlData) {
-      await authorize();
-    }
+
+    // STEP 1 authorize every upload
+    await b2.authorize();
+
+    // STEP 2 get fresh upload URL
+    const uploadUrlResponse = await b2.getUploadUrl({
+      bucketId: process.env.B2_BUCKET_ID,
+    });
+
+    const uploadUrl = uploadUrlResponse.data.uploadUrl;
+    const uploadAuthToken = uploadUrlResponse.data.authorizationToken;
 
     const file = req.file;
     const fileName = `${Date.now()}-${file.originalname}`;
 
+    // STEP 3 upload file
     await b2.uploadFile({
-      uploadUrl: uploadUrlData.data.uploadUrl,
-      uploadAuthToken: uploadUrlData.data.authorizationToken,
+      uploadUrl: uploadUrl,
+      uploadAuthToken: uploadAuthToken,
       fileName: fileName,
       data: file.buffer,
     });
 
-    // ⚠️ BUCKET NAME use karo (ID nahi)
     const fileUrl = `https://f005.backblazeb2.com/file/${process.env.B2_BUCKET_NAME}/${fileName}`;
 
     res.json({ url: fileUrl });
@@ -60,12 +50,11 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-
 app.get("/", (req, res) => {
   res.send("B2 Server Running ✅");
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
